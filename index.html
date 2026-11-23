@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="sq">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foto AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#ECEAF5;--ink:#1D1B4B;--blue:#2F4BFF;--mint:#BFF3D6;--card:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#14132E;--ink:#ECEAF5;--blue:#7C8CFF;--mint:#1F4D3A;--card:#1D1B4B}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px}
+main{width:100%;max-width:560px}
+h1{font-size:clamp(2.6rem,9vw,4.4rem);line-height:.95;margin:0 0 12px;font-weight:800;letter-spacing:-.03em}
+p.sub{margin:0 0 24px;opacity:.75;font-size:1.05rem}
+.row{display:flex;gap:8px}
+input{flex:1;padding:16px;font:inherit;border:2px solid var(--ink);border-radius:14px;background:var(--card);color:var(--ink)}
+button{padding:16px 22px;font:inherit;font-weight:700;border:0;border-radius:14px;background:var(--blue);color:#fff;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+#out{margin-top:24px}
+.frame{background:var(--card);border-radius:20px;padding:10px;border:2px solid var(--ink)}
+.frame img,.ph{width:100%;aspect-ratio:1;border-radius:12px;display:block;background:var(--mint)}
+.ph{display:grid;place-items:center;font-weight:700}
+.meta{display:flex;justify-content:space-between;gap:12px;font-size:.9rem;margin-top:10px;opacity:.8}
+a{color:var(--blue);font-weight:700}
+.err{color:#d6244a;font-weight:700}
+.modes{display:flex;gap:8px;margin-top:12px}
+.modes label{flex:1;text-align:center;padding:10px;border:2px solid var(--ink);border-radius:14px;font-weight:700;cursor:pointer}
+.modes input{position:absolute;opacity:0}
+.modes label:has(input:checked){background:var(--ink);color:var(--bg)}
+.modes label:has(input:focus-visible){outline:3px solid var(--blue);outline-offset:2px}
+.pick{display:flex;align-items:center;gap:12px;margin-top:12px}
+.pick label{padding:10px 16px;border:2px dashed var(--ink);border-radius:14px;cursor:pointer;font-weight:700}
+.pick input{display:none}
+.pick img{width:48px;height:48px;border-radius:50%;object-fit:cover;display:none}
+.pick .rm{background:none;color:var(--ink);padding:8px;display:none;text-decoration:underline}
+</style>
+</head>
+<body>
+<main>
+  <h1>Thuaj çka ta bej foto.</h1>
+  <p class="sub">Shkruaj në shqip ose anglisht, p.sh. “një mace me syze që ecën në plazh”.</p>
+  <div class="row">
+    <input id="p" maxlength="300" placeholder="Çfarë dëshiron të shohësh?" autocomplete="off">
+    <button id="go">Krijo</button>
+  </div>
+  <div class="modes">
+    <label><input type="radio" name="mode" value="photo" checked>Foto reale</label>
+    <label><input type="radio" name="mode" value="draw">Vizatim</label>
+    <label><input type="radio" name="mode" value="video">Video</label>
+  </div>
+  <div class="pick">
+    <label>Shto foton tënde<input id="ph" type="file" accept="image/*"></label>
+    <img id="thumb" alt="Foto jote"><button class="rm" id="rm" type="button">Hiqe</button>
+  </div>
+  <div id="out" aria-live="polite"></div>
+</main>
+<script>
+const $=s=>document.querySelector(s),p=$("#p"),go=$("#go"),out=$("#out"),ph=$("#ph"),thumb=$("#thumb"),rm=$("#rm");
+let photo=null;
+ph.onchange=async()=>{const f=ph.files[0];if(!f)return;
+  const b=await createImageBitmap(f),k=Math.min(1,768/Math.max(b.width,b.height)),c=document.createElement("canvas");
+  c.width=Math.round(b.width*k);c.height=Math.round(b.height*k);c.getContext("2d").drawImage(b,0,0,c.width,c.height);
+  photo=c.toDataURL("image/jpeg",.85);thumb.src=photo;thumb.style.display="block";rm.style.display="block"};
+rm.onclick=()=>{photo=null;ph.value="";thumb.style.display="none";rm.style.display="none"};
+async function run(){
+  const prompt=p.value.trim(); if(!prompt&&!photo) return;
+  const mode=document.querySelector('input[name=mode]:checked').value;
+  go.disabled=true; out.innerHTML='<div class="frame"><div class="ph">Po krijohet…</div></div>';
+  try{
+    const r=await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt,mode,photo})});
+    const raw=await r.text(); let d;
+    try{d=JSON.parse(raw)}catch(_){throw new Error("Serveri nuk u gjet. Faqja duhet të jetë e hostuar në Vercel bashkë me folderin api (jo e hapur si skedar ose në chat).")}
+    if(!r.ok) throw new Error(d.error||"Gabim nga serveri");
+    if(d.id){
+      out.innerHTML='<div class="frame"><div class="ph">Videoja po krijohet (1-2 min)…</div></div>';
+      let v=null;
+      for(let i=0;i<70&&!v;i++){
+        await new Promise(z=>setTimeout(z,4000));
+        const s=await(await fetch("/api/generate?id="+encodeURIComponent(d.id))).json();
+        if(s.error) throw new Error(s.error); v=s.video;
+      }
+      if(!v) throw new Error("Videoja po vonon shumë. Provo prapë.");
+      out.innerHTML=""; const fr=document.createElement("div");fr.className="frame";
+      const vd=document.createElement("video");vd.src=v;vd.controls=true;vd.autoplay=true;vd.loop=true;vd.muted=true;vd.playsInline=true;
+      vd.style.cssText="width:100%;border-radius:12px;display:block";fr.appendChild(vd);out.appendChild(fr);
+      const mt=document.createElement("div");mt.className="meta";mt.innerHTML=`<span>Video falas sot: edhe ${d.left}</span>`;
+      const dl=document.createElement("a");dl.href=v;dl.target="_blank";dl.rel="noopener";dl.textContent="Shkarko";mt.appendChild(dl);out.appendChild(mt);
+      go.disabled=false; return;
+    }
+    const src=d.svg?URL.createObjectURL(new Blob([d.svg],{type:"image/svg+xml"})):d.image;
+    out.innerHTML=""; const f=document.createElement("div");f.className="frame";
+    const im=document.createElement("img");im.src=src;im.alt=prompt||"Foto";f.appendChild(im);out.appendChild(f);
+    const m=document.createElement("div");m.className="meta";
+    m.innerHTML=`<span>Falas sot: edhe ${d.left}</span>`;
+    const a=document.createElement("a");a.href=src;a.download=d.svg?"foto.svg":"foto.jpg";a.target="_blank";a.rel="noopener";a.textContent="Shkarko";
+    m.appendChild(a);out.appendChild(m);
+  }catch(e){out.innerHTML="";const q=document.createElement("p");q.className="err";q.textContent=e.message||"Gabim";out.appendChild(q)}
+  go.disabled=false;
+}
+go.onclick=run; p.addEventListener("keydown",e=>{if(e.key==="Enter")run()});
+</script>
+</body>
+</html>
